@@ -34,6 +34,13 @@ ENV NEXT_PUBLIC_BETTER_AUTH_URL="http://localhost:3000"
 ENV FREESOUND_CLIENT_ID=$FREESOUND_CLIENT_ID
 ENV FREESOUND_API_KEY=$FREESOUND_API_KEY
 
+# Optional features (leave empty to disable) — required at build time by env validation.
+ENV CLOUDFLARE_ACCOUNT_ID=""
+ENV R2_ACCESS_KEY_ID=""
+ENV R2_SECRET_ACCESS_KEY=""
+ENV R2_BUCKET_NAME=""
+ENV MODAL_TRANSCRIPTION_URL=""
+
 WORKDIR /app/apps/web
 RUN bun run build
 
