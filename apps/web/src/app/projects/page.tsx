@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 import { RenameProjectDialog } from "@/components/rename-project-dialog";
@@ -63,6 +63,8 @@ export default function ProjectsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortOption, setSortOption] = useState("createdAt-desc");
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const embedded = searchParams.get("embedded") === "1";
 
   const getProjectThumbnail = useCallback(
     async (projectId: string): Promise<string | null> => {
@@ -138,13 +140,17 @@ export default function ProjectsPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="pt-6 px-6 flex items-center justify-between w-full h-16">
-        <Link
-          href="/"
-          className="flex items-center gap-1 hover:text-muted-foreground transition-colors"
-        >
-          <ChevronLeft className="size-5! shrink-0" />
-          <span className="text-sm font-medium">Back</span>
-        </Link>
+        {embedded ? (
+          <div />
+        ) : (
+          <Link
+            href="/"
+            className="flex items-center gap-1 hover:text-muted-foreground transition-colors"
+          >
+            <ChevronLeft className="size-5! shrink-0" />
+            <span className="text-sm font-medium">Back</span>
+          </Link>
+        )}
         <div className="block md:hidden">
           {isSelectionMode ? (
             <div className="flex items-center gap-2">
