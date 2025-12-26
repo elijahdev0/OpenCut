@@ -94,8 +94,49 @@ function ExportPopover({
     let fileHandle: FileSystemFileHandle | undefined;
     const supportsFilePicker =
       typeof window !== "undefined" && "showSaveFilePicker" in window;
-    const extension = getExportFileExtension(format);
-    const mimeType = getExportMimeType(format);
+    let exportFormat: ExportFormat = format;
+
+    // Firefox/WebCodecs often can't encode AAC. If we're in a browser without the File System Access API
+    // (i.e. likely Firefox), pick WebM so export works without asking the user to change settings.
+    if (!supportsFilePicker && format === "mp4" && includeAudio) {
+      const encoder = (globalThis as any).AudioEncoder as
+        | {
+            isConfigSupported: (config: AudioEncoderConfig) => Promise<{
+              supported: boolean;
+            }>;
+          }
+        | undefined;
+
+      let aacSupported = false;
+      if (encoder?.isConfigSupported) {
+        const candidateSampleRates = [48000, 44100];
+        const candidateBitrates = [192000, 160000, 128000, 96000];
+        for (const sampleRate of candidateSampleRates) {
+          for (const bitrate of candidateBitrates) {
+            try {
+              const res = await encoder.isConfigSupported({
+                codec: "mp4a.40.2",
+                sampleRate,
+                numberOfChannels: 2,
+                bitrate,
+              });
+              if (res.supported) {
+                aacSupported = true;
+                break;
+              }
+            } catch {}
+          }
+          if (aacSupported) break;
+        }
+      }
+
+      if (!aacSupported) {
+        exportFormat = "webm";
+      }
+    }
+
+    const extension = getExportFileExtension(exportFormat);
+    const mimeType = getExportMimeType(exportFormat);
     let writableStream: WritableStream<Uint8Array> | undefined;
     if (supportsFilePicker) {
       try {
@@ -124,7 +165,7 @@ function ExportPopover({
     }
 
     const result = await exportProject({
-      format,
+      format: exportFormat,
       quality,
       fps: activeProject.fps,
       includeAudio,

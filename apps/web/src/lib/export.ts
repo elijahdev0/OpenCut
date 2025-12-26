@@ -220,16 +220,61 @@ export async function exportProject(
     if (includeAudio) {
       onProgress?.(0.05); // 5% for audio processing
 
+      let audioSampleRate = 44100;
+      let aacBitrate: number | undefined;
+
+      // Firefox/WebCodecs often rejects AAC configs. Try to pick a supported AAC bitrate/sample rate up-front.
+      if (format === "mp4") {
+        const encoder = (globalThis as any).AudioEncoder as
+          | {
+              isConfigSupported: (config: AudioEncoderConfig) => Promise<{
+                supported: boolean;
+              }>;
+            }
+          | undefined;
+
+        const candidateSampleRates = [48000, 44100];
+        const candidateBitrates = [192000, 160000, 128000, 96000];
+        const channels = 2;
+
+        if (encoder?.isConfigSupported) {
+          outer: for (const sampleRate of candidateSampleRates) {
+            for (const bitrate of candidateBitrates) {
+              try {
+                const res = await encoder.isConfigSupported({
+                  codec: "mp4a.40.2",
+                  sampleRate,
+                  numberOfChannels: channels,
+                  bitrate,
+                });
+                if (res.supported) {
+                  audioSampleRate = sampleRate;
+                  aacBitrate = bitrate;
+                  break outer;
+                }
+              } catch {
+                // Ignore probe failures and keep searching
+              }
+            }
+          }
+        }
+      }
+
       audioBuffer = await createTimelineAudioBuffer(
         tracks,
         mediaFiles,
-        duration
+        duration,
+        audioSampleRate
       );
 
       if (audioBuffer) {
         audioSource = new AudioBufferSource({
           codec: format === "webm" ? "opus" : "aac", // Opus for WebM, AAC for MP4
-          bitrate: qualityMap[quality], // Use same quality for audio
+          bitrate:
+            format === "mp4"
+              ? (aacBitrate ?? qualityMap[quality])
+              : qualityMap[quality],
+          fullCodecString: format === "mp4" ? "mp4a.40.2" : undefined,
         });
 
         output.addAudioTrack(audioSource);
@@ -286,18 +331,10 @@ export async function exportProject(
 
     if (cancelled) {
       await output.cancel();
-      if (writable) {
-        try {
-          await writable.abort();
-        } catch {}
-      }
       return { success: false, cancelled: true };
     }
     videoSource.close();
     await output.finalize();
-    if (writable) {
-      await writable.close();
-    }
     onProgress?.(1);
 
     return {
