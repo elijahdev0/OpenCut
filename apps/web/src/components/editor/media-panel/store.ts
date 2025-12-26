@@ -5,6 +5,7 @@ import {
   StickerIcon,
   MusicIcon,
   VideoIcon,
+  ImageIcon,
   BlendIcon,
   SlidersHorizontalIcon,
   LucideIcon,
@@ -15,6 +16,7 @@ import { create } from "zustand";
 
 export type Tab =
   | "media"
+  | "axLibrary"
   | "sounds"
   | "text"
   | "stickers"
@@ -29,6 +31,10 @@ export const tabs: { [key in Tab]: { icon: LucideIcon; label: string } } = {
   media: {
     icon: VideoIcon,
     label: "Media",
+  },
+  axLibrary: {
+    icon: ImageIcon,
+    label: "Ax Library",
   },
   sounds: {
     icon: MusicIcon,

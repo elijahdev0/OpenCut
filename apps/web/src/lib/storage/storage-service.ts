@@ -183,6 +183,8 @@ class StorageService {
       height: mediaItem.height,
       duration: mediaItem.duration,
       ephemeral: mediaItem.ephemeral,
+      axGenerationId: mediaItem.axGenerationId,
+      axSource: mediaItem.axSource,
     };
 
     await mediaMetadataAdapter.set(mediaItem.id, metadata);
@@ -232,6 +234,8 @@ class StorageService {
       height: metadata.height,
       duration: metadata.duration,
       ephemeral: metadata.ephemeral,
+      axGenerationId: metadata.axGenerationId,
+      axSource: metadata.axSource,
     };
   }
 

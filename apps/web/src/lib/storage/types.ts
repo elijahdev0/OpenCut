@@ -20,6 +20,8 @@ export interface MediaFileData {
   duration?: number;
   ephemeral?: boolean;
   sourceStickerIconName?: string;
+  axGenerationId?: string;
+  axSource?: "ax" | "local";
   // File will be stored separately in OPFS
 }
 

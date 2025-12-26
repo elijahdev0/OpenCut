@@ -14,4 +14,12 @@ export interface MediaFile {
   fps?: number; // For video frame rate
   // Ephemeral items are used by timeline directly and should not appear in the media library or be persisted
   ephemeral?: boolean;
+
+  /**
+   * AxNextGen integration:
+   * If present, this media item is backed by AxNextGen's shared Library (`generations.id`).
+   */
+  axGenerationId?: string;
+  /** Where this item originated from (shared Ax library vs local import). */
+  axSource?: "ax" | "local";
 }

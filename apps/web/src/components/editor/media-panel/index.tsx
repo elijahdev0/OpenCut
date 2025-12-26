@@ -9,12 +9,14 @@ import { StickersView } from "./views/stickers";
 import { Separator } from "@/components/ui/separator";
 import { SettingsView } from "./views/settings";
 import { Captions } from "./views/captions";
+import { AxLibraryView } from "./views/ax-library";
 
 export function MediaPanel() {
   const { activeTab } = useMediaPanelStore();
 
   const viewMap: Record<Tab, React.ReactNode> = {
     media: <MediaView />,
+    axLibrary: <AxLibraryView />,
     sounds: <SoundsView />,
     text: <TextView />,
     stickers: <StickersView />,

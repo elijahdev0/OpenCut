@@ -135,6 +135,71 @@ export const getMediaAspectRatio = (item: MediaFile): number => {
   return 16 / 9; // Default aspect ratio
 };
 
+type AxPresignResponse = {
+  signedUrl: string;
+  publicUrl: string;
+  key?: string;
+};
+
+async function uploadMediaToAxLibrary({
+  file,
+}: {
+  file: File;
+}): Promise<string> {
+  const contentType = file.type || "application/octet-stream";
+
+  const presignRes = await fetch("/api/files/upload", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      filename: file.name,
+      contentType,
+    }),
+  });
+
+  if (!presignRes.ok) {
+    throw new Error(`Presign failed (${presignRes.status})`);
+  }
+
+  const presignJson = (await presignRes.json()) as AxPresignResponse;
+  if (!presignJson?.signedUrl || !presignJson?.publicUrl) {
+    throw new Error("Presign response missing signedUrl/publicUrl");
+  }
+
+  const putRes = await fetch(presignJson.signedUrl, {
+    method: "PUT",
+    headers: { "content-type": contentType },
+    body: file,
+  });
+  if (!putRes.ok) {
+    throw new Error(`Upload failed (${putRes.status})`);
+  }
+
+  const registerRes = await fetch("/api/uploads/register", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      url: presignJson.publicUrl,
+      name: file.name,
+      contentType,
+    }),
+  });
+  if (!registerRes.ok) {
+    throw new Error(`Register failed (${registerRes.status})`);
+  }
+
+  const registerJson = (await registerRes.json().catch(() => null)) as
+    | { ok?: boolean; id?: string }
+    | null;
+  if (!registerJson?.id) {
+    throw new Error("Register response missing id");
+  }
+
+  return registerJson.id;
+}
+
 export const useMediaStore = create<MediaStore>((set, get) => ({
   mediaFiles: [],
   isLoading: false,
@@ -159,6 +224,32 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
       set((state) => ({
         mediaFiles: state.mediaFiles.filter((media) => media.id !== newItem.id),
       }));
+      return;
+    }
+
+    // AxNextGen integration:
+    // If this was a local import (not from Ax library), upload it to the shared library.
+    if (!newItem.ephemeral && !newItem.axGenerationId) {
+      void (async () => {
+        try {
+          const axGenerationId = await uploadMediaToAxLibrary({
+            file: newItem.file,
+          });
+          const updated: MediaFile = {
+            ...newItem,
+            axGenerationId,
+            axSource: "local",
+          };
+          set((state) => ({
+            mediaFiles: state.mediaFiles.map((m) =>
+              m.id === newItem.id ? updated : m
+            ),
+          }));
+          await storageService.saveMediaFile({ projectId, mediaItem: updated });
+        } catch (error) {
+          console.error("Failed to sync media to Ax library:", error);
+        }
+      })();
     }
   },
 
@@ -206,6 +297,18 @@ export const useMediaStore = create<MediaStore>((set, get) => ({
       await storageService.deleteMediaFile({ projectId, id });
     } catch (error) {
       console.error("Failed to delete media item:", error);
+    }
+
+    // AxNextGen integration: also delete from shared library (best-effort).
+    if (item?.axGenerationId) {
+      void fetch("/api/library/delete", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ id: item.axGenerationId }),
+      }).catch((error) => {
+        console.error("Failed to delete from Ax library:", error);
+      });
     }
   },
 

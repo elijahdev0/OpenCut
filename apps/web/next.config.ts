@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 import { withBotId } from "botid/next/config";
 
 const nextConfig: NextConfig = {
+  basePath: "/opencut",
   compiler: {
     removeConsole: process.env.NODE_ENV === "production",
   },
