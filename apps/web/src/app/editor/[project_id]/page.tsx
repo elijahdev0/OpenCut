@@ -17,6 +17,8 @@ import { useProjectStore } from "@/stores/project-store";
 import { EditorProvider } from "@/components/providers/editor-provider";
 import { usePlaybackControls } from "@/hooks/use-playback-controls";
 import { Onboarding } from "@/components/editor/onboarding";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { MobileEditorToolbar } from "@/components/editor/mobile-editor-toolbar";
 
 export default function Editor() {
   const {
@@ -48,6 +50,7 @@ export default function Editor() {
   const isInitializingRef = useRef<boolean>(false);
 
   usePlaybackControls();
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     let isCancelled = false;
@@ -155,7 +158,36 @@ export default function Editor() {
       <div className="h-screen w-screen flex flex-col bg-background overflow-hidden">
         <EditorHeader />
         <div className="flex-1 min-h-0 min-w-0">
-          {activePreset === "media" ? (
+          {isMobile ? (
+            <div className="h-full w-full flex flex-col">
+              <MobileEditorToolbar />
+              <ResizablePanelGroup
+                key={`mobile-${resetCounter}`}
+                direction="vertical"
+                className="h-full w-full gap-[0.18rem] px-3 pb-3"
+              >
+                <ResizablePanel
+                  defaultSize={Math.max(30, 100 - timeline)}
+                  minSize={30}
+                  className="min-h-0 min-w-0 rounded-sm"
+                >
+                  <PreviewPanel />
+                </ResizablePanel>
+
+                <ResizableHandle withHandle />
+
+                <ResizablePanel
+                  defaultSize={timeline}
+                  minSize={20}
+                  maxSize={70}
+                  onResize={setTimeline}
+                  className="min-h-0 min-w-0"
+                >
+                  <Timeline />
+                </ResizablePanel>
+              </ResizablePanelGroup>
+            </div>
+          ) : activePreset === "media" ? (
             <ResizablePanelGroup
               key={`media-${activePreset}-${resetCounter}`}
               direction="horizontal"

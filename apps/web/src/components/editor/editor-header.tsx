@@ -21,12 +21,14 @@ import { FaDiscord } from "react-icons/fa6";
 import { PanelPresetSelector } from "./panel-preset-selector";
 import { ExportButton } from "./export-button";
 import { ThemeToggle } from "../theme-toggle";
+import { useIsMobile } from "@/hooks/use-mobile";
 
 export function EditorHeader() {
   const { activeProject, renameProject, deleteProject } = useProjectStore();
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [isRenameDialogOpen, setIsRenameDialogOpen] = useState(false);
   const router = useRouter();
+  const isMobile = useIsMobile();
 
   const handleNameSave = async (newName: string) => {
     console.log("handleNameSave", newName);
@@ -57,7 +59,15 @@ export function EditorHeader() {
             className="h-auto py-1.5 px-2.5 flex items-center justify-center"
           >
             <ChevronDown className="text-muted-foreground" />
-            <span className="text-[0.85rem] mr-2">{activeProject?.name}</span>
+            <span
+              className={
+                isMobile
+                  ? "text-[0.85rem] mr-2 max-w-[12rem] truncate"
+                  : "text-[0.85rem] mr-2"
+              }
+            >
+              {activeProject?.name}
+            </span>
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-40 z-100">
@@ -113,10 +123,14 @@ export function EditorHeader() {
 
   const rightContent = (
     <nav className="flex items-center gap-2">
-      <PanelPresetSelector />
-      <KeyboardShortcutsHelp />
       <ExportButton />
-      <ThemeToggle />
+      {!isMobile && (
+        <>
+          <PanelPresetSelector />
+          <KeyboardShortcutsHelp />
+          <ThemeToggle />
+        </>
+      )}
     </nav>
   );
 
