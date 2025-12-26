@@ -15,7 +15,7 @@ import {
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useState } from "react";
 import { DeleteProjectDialog } from "@/components/delete-project-dialog";
 import { RenameProjectDialog } from "@/components/rename-project-dialog";
 import { Button } from "@/components/ui/button";
@@ -40,7 +40,7 @@ import { useProjectStore } from "@/stores/project-store";
 import { useTimelineStore } from "@/stores/timeline-store";
 import type { TProject } from "@/types/project";
 
-export default function ProjectsPage() {
+function ProjectsPageContent() {
   const {
     savedProjects,
     isLoading,
@@ -648,5 +648,13 @@ function NoResults({
         Clear Search
       </Button>
     </div>
+  );
+}
+
+export default function ProjectsPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <ProjectsPageContent />
+    </Suspense>
   );
 }

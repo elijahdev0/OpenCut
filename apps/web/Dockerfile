@@ -18,9 +18,17 @@ COPY packages/auth/package.json packages/auth/package.json
 
 RUN bun install
 
-COPY apps/web/ apps/web/
-COPY packages/db/ packages/db/
-COPY packages/auth/ packages/auth/
+COPY apps/web/src apps/web/src
+COPY apps/web/public apps/web/public
+COPY apps/web/migrations apps/web/migrations
+COPY apps/web/next.config.ts apps/web/next.config.ts
+COPY apps/web/postcss.config.mjs apps/web/postcss.config.mjs
+COPY apps/web/tsconfig.json apps/web/tsconfig.json
+COPY apps/web/drizzle.config.ts apps/web/drizzle.config.ts
+COPY packages/db/src packages/db/src
+COPY packages/db/migrations packages/db/migrations
+COPY packages/db/drizzle.config.ts packages/db/drizzle.config.ts
+COPY packages/auth/src packages/auth/src
 
 ENV NODE_ENV production
 ENV NEXT_TELEMETRY_DISABLED 1
