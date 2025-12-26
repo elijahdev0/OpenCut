@@ -12,11 +12,13 @@ interface CachedFrame {
   imageData: ImageData;
   timelineHash: string;
   timestamp: number;
+  bytes: number;
 }
 
 interface FrameCacheOptions {
   maxCacheSize?: number; // Maximum number of cached frames
   cacheResolution?: number; // Frames per second to cache at
+  maxCacheBytes?: number; // Maximum total bytes across cached frames
 }
 
 // Shared singleton cache across hook instances (HMR-safe)
@@ -25,9 +27,25 @@ const __frameCacheGlobal: any = globalThis as any;
 const __sharedFrameCache: Map<number, CachedFrame> =
   __frameCacheGlobal.__sharedFrameCache ?? new Map<number, CachedFrame>();
 __frameCacheGlobal.__sharedFrameCache = __sharedFrameCache;
+const __sharedFrameCacheMeta: { totalBytes: number } =
+  __frameCacheGlobal.__sharedFrameCacheMeta ?? { totalBytes: 0 };
+__frameCacheGlobal.__sharedFrameCacheMeta = __sharedFrameCacheMeta;
 
 export function useFrameCache(options: FrameCacheOptions = {}) {
-  const { maxCacheSize = 300, cacheResolution = 30 } = options; // 10 seconds at 30fps
+  const deviceMemoryGb =
+    typeof navigator !== "undefined" && "deviceMemory" in navigator
+      ? (navigator as any).deviceMemory
+      : undefined;
+  const inferredMaxBytes =
+    typeof deviceMemoryGb === "number"
+      ? Math.floor(Math.max(16, Math.min(256, deviceMemoryGb * 16)) * 1024 * 1024)
+      : 64 * 1024 * 1024;
+
+  const {
+    maxCacheSize = 300,
+    cacheResolution = 30,
+    maxCacheBytes = inferredMaxBytes,
+  } = options; // Default: ~10 seconds at 30fps, but byte-capped.
 
   const frameCacheRef = useRef(__sharedFrameCache);
 
@@ -178,16 +196,9 @@ export function useFrameCache(options: FrameCacheOptions = {}) {
         activeProject,
         sceneId
       );
-      console.log(cached.timelineHash === currentHash);
       if (cached.timelineHash !== currentHash) {
         // Cache is stale, remove it
-        console.log(
-          "Cache miss - hash mismatch:",
-          JSON.stringify({
-            cachedHash: cached.timelineHash.slice(0, 100),
-            currentHash: currentHash.slice(0, 100),
-          })
-        );
+        __sharedFrameCacheMeta.totalBytes -= cached.bytes;
         frameCacheRef.current.delete(frameKey);
         return null;
       }
@@ -216,6 +227,15 @@ export function useFrameCache(options: FrameCacheOptions = {}) {
         sceneId
       );
 
+      const bytes = imageData.data.byteLength;
+      // If a single frame is too large, caching will cause memory spikes; skip caching.
+      if (bytes > maxCacheBytes / 4) return;
+
+      const existing = frameCacheRef.current.get(frameKey);
+      if (existing) {
+        __sharedFrameCacheMeta.totalBytes -= existing.bytes;
+      }
+
       // Enforce cache size limit (LRU eviction)
       if (frameCacheRef.current.size >= maxCacheSize) {
         // Remove oldest entries
@@ -225,7 +245,19 @@ export function useFrameCache(options: FrameCacheOptions = {}) {
         // Remove oldest 20% of entries
         const toRemove = Math.floor(entries.length * 0.2);
         for (let i = 0; i < toRemove; i++) {
+          __sharedFrameCacheMeta.totalBytes -= entries[i][1].bytes;
           frameCacheRef.current.delete(entries[i][0]);
+        }
+      }
+
+      // Enforce total byte limit (remove oldest until under limit).
+      if (__sharedFrameCacheMeta.totalBytes + bytes > maxCacheBytes) {
+        const entries = Array.from(frameCacheRef.current.entries());
+        entries.sort((a, b) => a[1].timestamp - b[1].timestamp);
+        for (const [key, value] of entries) {
+          if (__sharedFrameCacheMeta.totalBytes + bytes <= maxCacheBytes) break;
+          __sharedFrameCacheMeta.totalBytes -= value.bytes;
+          frameCacheRef.current.delete(key);
         }
       }
 
@@ -233,13 +265,18 @@ export function useFrameCache(options: FrameCacheOptions = {}) {
         imageData,
         timelineHash,
         timestamp: Date.now(),
+        bytes,
       });
+      __sharedFrameCacheMeta.totalBytes += bytes;
     },
-    [getTimelineHash, cacheResolution, maxCacheSize]
+    [getTimelineHash, cacheResolution, maxCacheSize, maxCacheBytes]
   );
 
   // Clear cache when timeline changes significantly
   const invalidateCache = useCallback(() => {
+    for (const [, value] of frameCacheRef.current.entries()) {
+      __sharedFrameCacheMeta.totalBytes -= value.bytes;
+    }
     frameCacheRef.current.clear();
   }, []);
 

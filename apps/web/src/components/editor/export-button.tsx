@@ -16,6 +16,7 @@ import {
   DEFAULT_EXPORT_OPTIONS,
 } from "@/lib/export";
 import { useProjectStore } from "@/stores/project-store";
+import { useTimelineStore } from "@/stores/timeline-store";
 import { Check, Copy, Download, RotateCcw, X } from "lucide-react";
 import { ExportFormat, ExportQuality, ExportResult } from "@/types/export";
 import { PropertyGroup } from "./properties-panel/property-item";
@@ -90,17 +91,64 @@ function ExportPopover({
     setProgress(0);
     setExportResult(null);
 
+    let fileHandle: FileSystemFileHandle | undefined;
+    const supportsFilePicker =
+      typeof window !== "undefined" && "showSaveFilePicker" in window;
+    if (!supportsFilePicker) {
+      const duration = useTimelineStore.getState().getTotalDuration();
+      const fps = activeProject.fps || 30;
+      const width = activeProject.canvasSize?.width ?? 1920;
+      const height = activeProject.canvasSize?.height ?? 1080;
+      const roughUncompressedBytes = Math.ceil(duration * fps) * width * height * 4;
+      // If we can't stream to disk, very large projects are likely to OOM with BufferTarget.
+      if (roughUncompressedBytes > 512 * 1024 * 1024) {
+        setIsExporting(false);
+        setExportResult({
+          success: false,
+          error:
+            "Export is too large for in-browser memory on this browser. Use a Chromium-based browser (enables streaming to disk), reduce duration/FPS/resolution, or disable audio.",
+        });
+        return;
+      }
+    }
+    if (supportsFilePicker) {
+      try {
+        const extension = getExportFileExtension(format);
+        const mimeType = getExportMimeType(format);
+        fileHandle = await (window as any).showSaveFilePicker({
+          suggestedName: `${activeProject.name}${extension}`,
+          types: [
+            {
+              description: format.toUpperCase(),
+              accept: { [mimeType]: [extension] },
+            },
+          ],
+        });
+      } catch {
+        setIsExporting(false);
+        return;
+      }
+    }
+
     const result = await exportProject({
       format,
       quality,
       fps: activeProject.fps,
       includeAudio,
+      fileHandle,
       onProgress: setProgress,
       onCancel: () => false, // TODO: Add cancel functionality
     });
 
     setIsExporting(false);
     setExportResult(result);
+
+    if (result.success && result.savedToFile) {
+      onOpenChange(false);
+      setExportResult(null);
+      setProgress(0);
+      return;
+    }
 
     if (result.success && result.buffer) {
       // Download the file

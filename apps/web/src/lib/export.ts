@@ -3,6 +3,7 @@ import {
   Mp4OutputFormat,
   WebMOutputFormat,
   BufferTarget,
+  StreamTarget,
   CanvasSource,
   AudioBufferSource,
   QUALITY_LOW,
@@ -32,125 +33,94 @@ const qualityMap = {
   very_high: QUALITY_VERY_HIGH,
 };
 
-interface AudioElement {
-  buffer: AudioBuffer;
-  startTime: number;
-  duration: number;
-  trimStart: number;
-  trimEnd: number;
-  muted: boolean;
-}
-
 async function createTimelineAudioBuffer(
   tracks: TimelineTrack[],
   mediaFiles: MediaFile[],
   duration: number,
   sampleRate: number = 44100
 ): Promise<AudioBuffer | null> {
-  // Get Web Audio context
-  const audioContext = new (window.AudioContext ||
-    (window as any).webkitAudioContext)();
+  // Mix using OfflineAudioContext to avoid huge JS-side nested loops.
+  const Ctx =
+    window.OfflineAudioContext || (window as any).webkitOfflineAudioContext;
+  if (!Ctx) return null;
 
-  // Collect all audio elements from timeline
-  const audioElements: AudioElement[] = [];
   const mediaMap = new Map<string, MediaFile>(mediaFiles.map((m) => [m.id, m]));
+  const audioElements: Array<{
+    file: File;
+    name: string;
+    startTime: number;
+    duration: number;
+    trimStart: number;
+    trimEnd: number;
+    muted: boolean;
+  }> = [];
 
   for (const track of tracks) {
     if (track.muted) continue;
-
     for (const element of track.elements) {
       if (element.type !== "media") continue;
-
-      const mediaElement = element;
-      const mediaItem = mediaMap.get(mediaElement.mediaId);
+      const mediaItem = mediaMap.get(element.mediaId);
       if (!mediaItem || mediaItem.type !== "audio") continue;
 
-      const visibleDuration =
-        mediaElement.duration - mediaElement.trimStart - mediaElement.trimEnd;
+      const visibleDuration = element.duration - element.trimStart - element.trimEnd;
+      if (visibleDuration <= 0) continue;
+
+      audioElements.push({
+        file: mediaItem.file,
+        name: mediaItem.name,
+        startTime: element.startTime,
+        duration: element.duration,
+        trimStart: element.trimStart,
+        trimEnd: element.trimEnd,
+        muted: !!element.muted || !!track.muted,
+      });
+    }
+  }
+
+  const renderLength = Math.max(1, Math.ceil(duration * sampleRate));
+  const offline = new Ctx(2, renderLength, sampleRate) as OfflineAudioContext;
+
+  const decodeContext = new (window.AudioContext ||
+    (window as any).webkitAudioContext)();
+
+  try {
+    for (const el of audioElements) {
+      if (el.muted) continue;
+      const visibleDuration = el.duration - el.trimStart - el.trimEnd;
       if (visibleDuration <= 0) continue;
 
       try {
-        // Decode audio file
-        const arrayBuffer = await mediaItem.file.arrayBuffer();
-        const audioBuffer = await audioContext.decodeAudioData(
-          arrayBuffer.slice(0)
-        );
+        const arrayBuffer = await el.file.arrayBuffer();
+        const decoded = await decodeContext.decodeAudioData(arrayBuffer.slice(0));
 
-        audioElements.push({
-          buffer: audioBuffer,
-          startTime: mediaElement.startTime,
-          duration: mediaElement.duration,
-          trimStart: mediaElement.trimStart,
-          trimEnd: mediaElement.trimEnd,
-          muted: mediaElement.muted || track.muted || false,
-        });
+        const src = offline.createBufferSource();
+        src.buffer = decoded;
+        src.connect(offline.destination);
+
+        const when = Math.max(0, el.startTime);
+        const offset = Math.max(0, el.trimStart);
+        const playDuration = Math.max(0, Math.min(visibleDuration, decoded.duration - offset));
+        if (playDuration > 0) {
+          src.start(when, offset, playDuration);
+        }
       } catch (error) {
-        console.warn(`Failed to decode audio file ${mediaItem.name}:`, error);
+        console.warn(`Failed to decode audio file ${el.name}:`, error);
       }
     }
+
+    const mixed = await offline.startRendering();
+    return mixed;
+  } finally {
+    try {
+      await decodeContext.close();
+    } catch {}
   }
-
-  if (audioElements.length === 0) {
-    return null; // No audio to mix
-  }
-
-  // Create output buffer
-  const outputChannels = 2; // Stereo
-  const outputLength = Math.ceil(duration * sampleRate);
-  const outputBuffer = audioContext.createBuffer(
-    outputChannels,
-    outputLength,
-    sampleRate
-  );
-
-  // Mix all audio elements
-  for (const element of audioElements) {
-    if (element.muted) continue;
-
-    const {
-      buffer,
-      startTime,
-      trimStart,
-      trimEnd,
-      duration: elementDuration,
-    } = element;
-
-    // Calculate timing
-    const sourceStartSample = Math.floor(trimStart * buffer.sampleRate);
-    const sourceDuration = elementDuration - trimStart - trimEnd;
-    const sourceLengthSamples = Math.floor(sourceDuration * buffer.sampleRate);
-    const outputStartSample = Math.floor(startTime * sampleRate);
-
-    // Resample if needed (simple approach)
-    const resampleRatio = sampleRate / buffer.sampleRate;
-    const resampledLength = Math.floor(sourceLengthSamples * resampleRatio);
-
-    // Mix each channel
-    for (let channel = 0; channel < outputChannels; channel++) {
-      const outputData = outputBuffer.getChannelData(channel);
-      const sourceChannel = Math.min(channel, buffer.numberOfChannels - 1);
-      const sourceData = buffer.getChannelData(sourceChannel);
-
-      for (let i = 0; i < resampledLength; i++) {
-        const outputIndex = outputStartSample + i;
-        if (outputIndex >= outputLength) break;
-
-        // Simple resampling (could be improved with proper interpolation)
-        const sourceIndex = sourceStartSample + Math.floor(i / resampleRatio);
-        if (sourceIndex >= sourceData.length) break;
-
-        outputData[outputIndex] += sourceData[sourceIndex];
-      }
-    }
-  }
-
-  return outputBuffer;
 }
 
 export async function exportProject(
   options: ExportOptions
 ): Promise<ExportResult> {
-  const { format, quality, fps, includeAudio, onProgress, onCancel } = options;
+  const { format, quality, fps, includeAudio, fileHandle, onProgress, onCancel } = options;
 
   try {
     const timelineStore = useTimelineStore.getState();
@@ -176,11 +146,14 @@ export async function exportProject(
     const outputFormat =
       format === "webm" ? new WebMOutputFormat() : new Mp4OutputFormat();
 
-    // BufferTarget for smaller files, StreamTarget for larger ones
-    // TODO: Implement StreamTarget
+    // Prefer streaming to disk when possible to avoid holding large outputs in memory.
+    const writable = fileHandle ? await fileHandle.createWritable() : null;
+    const target = writable
+      ? new StreamTarget(writable, { chunked: true })
+      : new BufferTarget();
     const output = new Output({
       format: outputFormat,
-      target: new BufferTarget(),
+      target,
     });
 
     // Canvas for rendering
@@ -273,15 +246,24 @@ export async function exportProject(
 
     if (cancelled) {
       await output.cancel();
+      if (writable) {
+        try {
+          await writable.abort();
+        } catch {}
+      }
       return { success: false, cancelled: true };
     }
     videoSource.close();
     await output.finalize();
+    if (writable) {
+      await writable.close();
+    }
     onProgress?.(1);
 
     return {
       success: true,
-      buffer: output.target.buffer || undefined,
+      savedToFile: !!writable,
+      buffer: !writable ? (target as BufferTarget).buffer || undefined : undefined,
     };
   } catch (error) {
     console.error("Export failed:", error);

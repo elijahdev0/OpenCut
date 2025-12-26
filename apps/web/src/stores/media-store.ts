@@ -43,20 +43,23 @@ export const getImageDimensions = (
 ): Promise<{ width: number; height: number }> => {
   return new Promise((resolve, reject) => {
     const img = new window.Image();
+    const url = URL.createObjectURL(file);
 
     img.addEventListener("load", () => {
       const width = img.naturalWidth;
       const height = img.naturalHeight;
       resolve({ width, height });
+      URL.revokeObjectURL(url);
       img.remove();
     });
 
     img.addEventListener("error", () => {
       reject(new Error("Could not load image"));
+      URL.revokeObjectURL(url);
       img.remove();
     });
 
-    img.src = URL.createObjectURL(file);
+    img.src = url;
   });
 };
 
@@ -68,8 +71,10 @@ export const generateVideoThumbnail = (
     const video = document.createElement("video") as HTMLVideoElement;
     const canvas = document.createElement("canvas") as HTMLCanvasElement;
     const ctx = canvas.getContext("2d");
+    const url = URL.createObjectURL(file);
 
     if (!ctx) {
+      URL.revokeObjectURL(url);
       reject(new Error("Could not get canvas context"));
       return;
     }
@@ -91,17 +96,21 @@ export const generateVideoThumbnail = (
       resolve({ thumbnailUrl, width, height });
 
       // Cleanup
+      URL.revokeObjectURL(url);
+      video.src = "";
       video.remove();
       canvas.remove();
     });
 
     video.addEventListener("error", () => {
       reject(new Error("Could not load video"));
+      URL.revokeObjectURL(url);
+      video.src = "";
       video.remove();
       canvas.remove();
     });
 
-    video.src = URL.createObjectURL(file);
+    video.src = url;
     video.load();
   });
 };
@@ -112,18 +121,21 @@ export const getMediaDuration = (file: File): Promise<number> => {
     const element = document.createElement(
       file.type.startsWith("video/") ? "video" : "audio"
     ) as HTMLVideoElement;
+    const url = URL.createObjectURL(file);
 
     element.addEventListener("loadedmetadata", () => {
       resolve(element.duration);
+      URL.revokeObjectURL(url);
       element.remove();
     });
 
     element.addEventListener("error", () => {
       reject(new Error("Could not load media"));
+      URL.revokeObjectURL(url);
       element.remove();
     });
 
-    element.src = URL.createObjectURL(file);
+    element.src = url;
     element.load();
   });
 };

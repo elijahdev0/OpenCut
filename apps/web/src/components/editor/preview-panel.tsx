@@ -15,6 +15,7 @@ import { formatTimeCode } from "@/lib/time";
 import { EditableTimecode } from "@/components/ui/editable-timecode";
 import { useFrameCache } from "@/hooks/use-frame-cache";
 import { useSceneStore } from "@/stores/scene-store";
+import { videoCache } from "@/lib/video-cache";
 import {
   DEFAULT_CANVAS_SIZE,
   DEFAULT_FPS,
@@ -65,6 +66,37 @@ export function PreviewPanel() {
     height: 0,
   });
   const [isExpanded, setIsExpanded] = useState(false);
+
+  // Free decoded audio buffers/sources when switching projects to reduce memory growth.
+  useEffect(() => {
+    for (const src of playingSourcesRef.current) {
+      try {
+        src.stop();
+      } catch {}
+    }
+    playingSourcesRef.current.clear();
+    audioBuffersRef.current.clear();
+    videoCache.clearAll();
+    if (audioContextRef.current) {
+      try {
+        void audioContextRef.current.close();
+      } catch {}
+    }
+    audioContextRef.current = null;
+    audioGainRef.current = null;
+  }, [activeProject?.id]);
+
+  // Keep decoded audio buffer cache in sync with current media list.
+  useEffect(() => {
+    const audioIds = new Set(
+      mediaFiles.filter((m) => m.type === "audio").map((m) => m.id)
+    );
+    for (const id of audioBuffersRef.current.keys()) {
+      if (!audioIds.has(id)) {
+        audioBuffersRef.current.delete(id);
+      }
+    }
+  }, [mediaFiles]);
 
   const canvasSize = activeProject?.canvasSize || DEFAULT_CANVAS_SIZE;
   const [dragState, setDragState] = useState<TextElementDragState>({
