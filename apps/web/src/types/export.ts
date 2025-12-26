@@ -11,6 +11,11 @@ export interface ExportOptions {
    * export will be streamed directly to disk to avoid large in-memory buffers.
    */
   fileHandle?: FileSystemFileHandle;
+  /**
+   * Writable stream fallback for browsers without File System Access API.
+   * Intended for StreamTarget streaming (e.g. StreamSaver.js).
+   */
+  writableStream?: WritableStream<Uint8Array>;
   onProgress?: (progress: number) => void;
   onCancel?: () => boolean;
 }

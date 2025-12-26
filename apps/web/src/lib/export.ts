@@ -4,6 +4,7 @@ import {
   WebMOutputFormat,
   BufferTarget,
   StreamTarget,
+  type StreamTargetChunk,
   CanvasSource,
   AudioBufferSource,
   QUALITY_LOW,
@@ -120,7 +121,16 @@ async function createTimelineAudioBuffer(
 export async function exportProject(
   options: ExportOptions
 ): Promise<ExportResult> {
-  const { format, quality, fps, includeAudio, fileHandle, onProgress, onCancel } = options;
+  const {
+    format,
+    quality,
+    fps,
+    includeAudio,
+    fileHandle,
+    writableStream,
+    onProgress,
+    onCancel,
+  } = options;
 
   try {
     const timelineStore = useTimelineStore.getState();
@@ -146,10 +156,40 @@ export async function exportProject(
     const outputFormat =
       format === "webm" ? new WebMOutputFormat() : new Mp4OutputFormat();
 
-    // Prefer streaming to disk when possible to avoid holding large outputs in memory.
+    // Prefer streaming (disk or SW-backed) when possible to avoid holding large outputs in memory.
     const writable = fileHandle ? await fileHandle.createWritable() : null;
-    const target = writable
-      ? new StreamTarget(writable, { chunked: true })
+
+    const streamWritable: WritableStream<StreamTargetChunk> | null = writable
+      ? // FileSystemWritableFileStream accepts chunk objects (including position), so pass through.
+        (writable as unknown as WritableStream<StreamTargetChunk>)
+      : writableStream
+        ? // Wrap a byte-only stream (e.g. StreamSaver) into the chunked form Mediabunny expects.
+          (() => {
+            const byteWriter = writableStream.getWriter();
+            return new WritableStream<StreamTargetChunk>({
+              async write(chunk) {
+                await byteWriter.write(chunk.data);
+              },
+              async close() {
+                try {
+                  await byteWriter.close();
+                } finally {
+                  byteWriter.releaseLock();
+                }
+              },
+              async abort(reason) {
+                try {
+                  await byteWriter.abort(reason);
+                } finally {
+                  byteWriter.releaseLock();
+                }
+              },
+            });
+          })()
+        : null;
+
+    const target = streamWritable
+      ? new StreamTarget(streamWritable, { chunked: true })
       : new BufferTarget();
     const output = new Output({
       format: outputFormat,
@@ -262,8 +302,10 @@ export async function exportProject(
 
     return {
       success: true,
-      savedToFile: !!writable,
-      buffer: !writable ? (target as BufferTarget).buffer || undefined : undefined,
+      savedToFile: !!streamWritable,
+      buffer: !streamWritable
+        ? (target as BufferTarget).buffer || undefined
+        : undefined,
     };
   } catch (error) {
     console.error("Export failed:", error);

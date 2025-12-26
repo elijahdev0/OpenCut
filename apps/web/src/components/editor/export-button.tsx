@@ -16,10 +16,10 @@ import {
   DEFAULT_EXPORT_OPTIONS,
 } from "@/lib/export";
 import { useProjectStore } from "@/stores/project-store";
-import { useTimelineStore } from "@/stores/timeline-store";
 import { Check, Copy, Download, RotateCcw, X } from "lucide-react";
 import { ExportFormat, ExportQuality, ExportResult } from "@/types/export";
 import { PropertyGroup } from "./properties-panel/property-item";
+import { createDownloadWriteStream } from "@/lib/stream-download";
 
 export function ExportButton() {
   const [isExportPopoverOpen, setIsExportPopoverOpen] = useState(false);
@@ -94,27 +94,11 @@ function ExportPopover({
     let fileHandle: FileSystemFileHandle | undefined;
     const supportsFilePicker =
       typeof window !== "undefined" && "showSaveFilePicker" in window;
-    if (!supportsFilePicker) {
-      const duration = useTimelineStore.getState().getTotalDuration();
-      const fps = activeProject.fps || 30;
-      const width = activeProject.canvasSize?.width ?? 1920;
-      const height = activeProject.canvasSize?.height ?? 1080;
-      const roughUncompressedBytes = Math.ceil(duration * fps) * width * height * 4;
-      // If we can't stream to disk, very large projects are likely to OOM with BufferTarget.
-      if (roughUncompressedBytes > 512 * 1024 * 1024) {
-        setIsExporting(false);
-        setExportResult({
-          success: false,
-          error:
-            "Export is too large for in-browser memory on this browser. Use a Chromium-based browser (enables streaming to disk), reduce duration/FPS/resolution, or disable audio.",
-        });
-        return;
-      }
-    }
+    const extension = getExportFileExtension(format);
+    const mimeType = getExportMimeType(format);
+    let writableStream: WritableStream<Uint8Array> | undefined;
     if (supportsFilePicker) {
       try {
-        const extension = getExportFileExtension(format);
-        const mimeType = getExportMimeType(format);
         fileHandle = await (window as any).showSaveFilePicker({
           suggestedName: `${activeProject.name}${extension}`,
           types: [
@@ -128,6 +112,15 @@ function ExportPopover({
         setIsExporting(false);
         return;
       }
+    } else {
+      try {
+        writableStream = createDownloadWriteStream({
+          filename: `${activeProject.name}${extension}`,
+        });
+      } catch {
+        // If StreamSaver isn't available (e.g. no service worker support),
+        // fall back to in-memory export.
+      }
     }
 
     const result = await exportProject({
@@ -136,6 +129,7 @@ function ExportPopover({
       fps: activeProject.fps,
       includeAudio,
       fileHandle,
+      writableStream,
       onProgress: setProgress,
       onCancel: () => false, // TODO: Add cancel functionality
     });
@@ -152,8 +146,6 @@ function ExportPopover({
 
     if (result.success && result.buffer) {
       // Download the file
-      const mimeType = getExportMimeType(format);
-      const extension = getExportFileExtension(format);
       const blob = new Blob([result.buffer], { type: mimeType });
       const url = URL.createObjectURL(blob);
 
